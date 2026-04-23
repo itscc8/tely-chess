@@ -234,11 +234,11 @@ function MultiplayerPanel({
       </div>
       <div className="flex justify-between text-sm">
         <span className={playerColor === "w" ? "text-cyan-400 font-bold" : "text-zinc-400"}>White</span>
-        <span className="font-mono">{formatTime(timers.white)}</span>
+        <span className="font-mono text-white">{formatTime(timers.white)}</span>
       </div>
       <div className="flex justify-between text-sm">
         <span className={playerColor === "b" ? "text-cyan-400 font-bold" : "text-zinc-400"}>Black</span>
-        <span className="font-mono">{formatTime(timers.black)}</span>
+        <span className="font-mono text-white">{formatTime(timers.black)}</span>
       </div>
       {roomId && (
         <button

@@ -5,6 +5,7 @@
     "@socket.io/bun-engine": "^0.1.1",
     "axios": "^1.9.0",
     "chess.js": "^1.4.0",
+    "hono": "^4.12.14",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {

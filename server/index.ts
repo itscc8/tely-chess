@@ -1,10 +1,20 @@
 import { Server } from "socket.io";
 import { Server as Engine } from "@socket.io/bun-engine";
+import { Hono } from "hono";
 import { Chess } from "chess.js";
 
 const io = new Server();
 const engine = new Engine({ path: "/socket.io/", cors: { origin: "*" } });
 io.bind(engine);
+
+const app = new Hono();
+
+app.get("*", async (c) => {
+  const url = new URL(c.req.url);
+  const filePath = url.pathname === "/" ? "/index.html" : url.pathname;
+  const file = Bun.file(`public${filePath}`);
+  return new Response(file);
+});
 
 const users: Map<string, { id: string; username: string }> = new Map();
 
@@ -247,15 +257,19 @@ io.on("connection", (socket) => {
   });
 });
 
-export default {
+const { websocket } = engine.handler();
+
+Bun.serve({
   port: 3000,
-  fetch(req) {
+  idleTimeout: 30,
+  fetch(req, server) {
     const url = new URL(req.url);
-    const filePath = url.pathname === "/" ? "/index.html" : url.pathname;
-    const file = Bun.file(`public${filePath}`);
-    return new Response(file);
+    if (url.pathname.startsWith("/socket.io/")) {
+      return engine.handleRequest(req, server);
+    }
+    return app.fetch(req, server);
   },
-  ...engine.handler(),
-};
+  websocket,
+});
 
 console.log("Server running on http://localhost:3000");
