@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Chess, Square } from "chess.js";
 import {
   ConversationProvider,
@@ -10,6 +10,7 @@ import {
   useConversationClientTool,
 } from "@elevenlabs/react";
 import { Orb } from "@/components/ui/orb";
+import { useSocket } from "@/hooks/useSocket";
 
 const PIECE_SYMBOLS: Record<string, string> = {
   K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
@@ -207,12 +208,127 @@ function simpleAIMove(game: Chess): { from: string; to: string } | null {
   return { from: move.from, to: move.to };
 }
 
+function MultiplayerPanel({
+  roomId,
+  playerColor,
+  timers,
+  onLeave,
+}: {
+  roomId: string | null;
+  playerColor: "w" | "b" | null;
+  timers: { white: number; black: number };
+  onLeave: () => void;
+}) {
+  const formatTime = (ms: number) => {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div className="flex flex-col gap-3 p-4 bg-zinc-800/50 rounded-xl border border-cyan-500/20">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-zinc-400">Room:</span>
+        <span className="font-mono text-cyan-400">{roomId || "---"}</span>
+      </div>
+      <div className="flex justify-between text-sm">
+        <span className={playerColor === "w" ? "text-cyan-400 font-bold" : "text-zinc-400"}>White</span>
+        <span className="font-mono">{formatTime(timers.white)}</span>
+      </div>
+      <div className="flex justify-between text-sm">
+        <span className={playerColor === "b" ? "text-cyan-400 font-bold" : "text-zinc-400"}>Black</span>
+        <span className="font-mono">{formatTime(timers.black)}</span>
+      </div>
+      {roomId && (
+        <button
+          onClick={onLeave}
+          className="mt-2 px-4 py-2 text-sm bg-red-500/20 text-red-400 rounded-lg border border-red-500/30 hover:bg-red-500/30 transition-all"
+        >
+          Leave Room
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ChessGame() {
+  const socket = useSocket();
   const [game, setGame] = useState(() => new Chess());
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [legalMoves, setLegalMoves] = useState<string[]>([]);
   const [gameStatus, setGameStatus] = useState<string>("");
   const [isAIThinking, setIsAIThinking] = useState(false);
+  
+  // Multiplayer state
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [playerColor, setPlayerColor] = useState<"w" | "b" | null>(null);
+  const [timers, setTimers] = useState({ white: 600000, black: 600000 });
+  const [joinCode, setJoinCode] = useState("");
+  const [isMultiplayer, setIsMultiplayer] = useState(false);
+
+  // Handle URL params for joining via link
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("room");
+    if (code && socket) {
+      socket.emit("api:join_room", code);
+    }
+  }, [socket]);
+
+  // Socket event handlers
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on("api:room_created", (res: { data: { roomId: string; color: "w" | "b" } }) => {
+      setRoomId(res.data.roomId);
+      setPlayerColor(res.data.color);
+      setIsMultiplayer(true);
+      window.history.replaceState({}, "", `?room=${res.data.roomId}`);
+    });
+
+    socket.on("api:room_joined", (res: { data: { roomId: string; color: "w" | "b" } }) => {
+      setRoomId(res.data.roomId);
+      setPlayerColor(res.data.color);
+      setIsMultiplayer(true);
+    });
+
+    socket.on("api:room_state", (res: { data: { fen: string; timers: { white: number; black: number }; turn: "w" | "b"; color: "w" | "b" } }) => {
+      setGame(new Chess(res.data.fen));
+      setTimers(res.data.timers);
+      setPlayerColor(res.data.color);
+      if (res.data.turn === "w") {
+        setGameStatus("White to move");
+      } else {
+        setGameStatus("Black to move");
+      }
+    });
+
+    socket.on("api:game_over", (res: { data: { winner: string | null; reason: string } }) => {
+      if (res.data.winner) {
+        const winnerName = res.data.winner === "w" ? "White" : "Black";
+        setGameStatus(`${winnerName} wins by ${res.data.reason}!`);
+      } else {
+        setGameStatus("Draw!");
+      }
+      setRoomId(null);
+      setPlayerColor(null);
+      setIsMultiplayer(false);
+      window.history.replaceState({}, "", window.location.pathname);
+    });
+
+    socket.on("api:error", (res: { error: string }) => {
+      alert(res.error);
+    });
+
+    return () => {
+      socket.off("api:room_created");
+      socket.off("api:room_joined");
+      socket.off("api:room_state");
+      socket.off("api:game_over");
+      socket.off("api:error");
+    };
+  }, [socket]);
 
   const updateGameState = useCallback((newGame: Chess) => {
     setGame(new Chess(newGame.fen()));
@@ -230,6 +346,15 @@ function ChessGame() {
 
   const makeMove = useCallback(
     (from: string, to: string, promotion?: "q" | "r" | "b" | "n") => {
+      // Multiplayer move
+      if (isMultiplayer && socket && roomId) {
+        socket.emit("api:make_move", { from, to, promotion });
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return true;
+      }
+      
+      // Single player move
       try {
         const move = game.move({ from: from as Square, to: to as Square, promotion });
         if (move) {
@@ -255,12 +380,15 @@ function ChessGame() {
       }
       return false;
     },
-    [game, updateGameState]
+    [game, updateGameState, isMultiplayer, socket, roomId]
   );
 
   const handleSquareClick = useCallback(
     (square: string) => {
       if (isAIThinking) return;
+      
+      // In multiplayer, only allow moves on your turn
+      if (isMultiplayer && playerColor && game.turn() !== playerColor) return;
 
       if (selectedSquare) {
         const success = makeMove(selectedSquare, square);
@@ -284,7 +412,7 @@ function ChessGame() {
         }
       }
     },
-    [game, selectedSquare, isAIThinking, makeMove]
+    [game, selectedSquare, isAIThinking, makeMove, isMultiplayer, playerColor]
   );
 
   const resetGame = useCallback(() => {
@@ -295,20 +423,54 @@ function ChessGame() {
     setIsAIThinking(false);
   }, []);
 
+  const createRoom = useCallback(() => {
+    if (socket) {
+      socket.emit("api:create_room");
+    }
+  }, [socket]);
+
+  const joinRoom = useCallback(() => {
+    if (socket && joinCode.trim()) {
+      socket.emit("api:join_room", joinCode.trim().toUpperCase());
+      setJoinCode("");
+    }
+  }, [socket, joinCode]);
+
+  const leaveRoom = useCallback(() => {
+    if (socket) {
+      socket.emit("api:leave_room");
+      setRoomId(null);
+      setPlayerColor(null);
+      setIsMultiplayer(false);
+      resetGame();
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [socket, resetGame]);
+
   return (
     <ConversationProvider>
       <div className="flex flex-col lg:flex-row items-center gap-8 p-4">
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center gap-4 mb-2">
             <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">
-              {isAIThinking ? "AI is thinking..." : game.turn() === "w" ? "Your turn (White)" : "AI's turn (Black)"}
+              {isMultiplayer
+                ? playerColor === game.turn()
+                  ? "Your turn"
+                  : "Opponent's turn"
+                : isAIThinking
+                ? "AI is thinking..."
+                : game.turn() === "w"
+                ? "Your turn (White)"
+                : "AI's turn (Black)"}
             </h2>
-            <button
-              onClick={resetGame}
-              className="px-4 py-2 text-sm bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-cyan-400 rounded-lg border border-cyan-500/30 hover:from-cyan-500/30 hover:to-purple-500/30 transition-all font-semibold"
-            >
-              New Game
-            </button>
+            {!isMultiplayer && (
+              <button
+                onClick={resetGame}
+                className="px-4 py-2 text-sm bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-cyan-400 rounded-lg border border-cyan-500/30 hover:from-cyan-500/30 hover:to-purple-500/30 transition-all font-semibold"
+              >
+                New Game
+              </button>
+            )}
           </div>
 
           {gameStatus && (
@@ -328,7 +490,47 @@ function ChessGame() {
           <p className="text-sm text-zinc-500 mt-2">Click pieces to move • Voice commands available</p>
         </div>
 
-        <AgentPanel game={game} makeMove={makeMove} />
+        <div className="flex flex-col gap-4">
+          {!isMultiplayer && (
+            <div className="flex flex-col gap-3 p-4 bg-zinc-800/50 rounded-xl border border-cyan-500/20">
+              <h3 className="text-sm font-semibold text-zinc-300">Multiplayer</h3>
+              <button
+                onClick={createRoom}
+                className="px-4 py-2 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-cyan-400 rounded-lg border border-cyan-500/30 hover:from-cyan-500/30 hover:to-purple-500/30 transition-all font-semibold"
+              >
+                Create Room
+              </button>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  placeholder="Room code"
+                  maxLength={6}
+                  className="flex-1 px-3 py-2 bg-zinc-700/50 text-zinc-200 rounded-lg border border-zinc-600 focus:border-cyan-500 focus:outline-none font-mono"
+                />
+                <button
+                  onClick={joinRoom}
+                  disabled={!joinCode.trim()}
+                  className="px-4 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg border border-cyan-500/30 hover:bg-cyan-500/30 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Join
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isMultiplayer && (
+            <MultiplayerPanel
+              roomId={roomId}
+              playerColor={playerColor}
+              timers={timers}
+              onLeave={leaveRoom}
+            />
+          )}
+
+          <AgentPanel game={game} makeMove={makeMove} />
+        </div>
       </div>
     </ConversationProvider>
   );
