@@ -1,0 +1,10 @@
+{
+  "name": "chess",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --filter 'chess-*' dev",
+    "build": "cd client && bun run build && mv out ../server/public",
+    "start": "cd server && bun run index.ts"
+  },
+  "workspaces": ["client", "server"]
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "",
+  "name": "backend",
+  "description": "",
+  "prompt": null,
+  "welcomeMessage": null,
+  "tools": [],
+  "toolAliases": {},
+  "toolsSettings": null,
+  "toolSchema": null,
+  "hooks": {},
+  "mcpServers": {},
+  "useLegacyMcpJson": false,
+  "resources": [],
+  "allowedTools": [],
+  "model": null
+}

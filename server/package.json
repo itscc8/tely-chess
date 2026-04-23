@@ -1,0 +1,12 @@
+{
+  "name": "chess-server",
+  "type": "module",
+  "dependencies": {
+    "socket.io": "^4.8.3",
+    "axios": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.8.3"
+  }
+}
