@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Chess, Square, PieceSymbol, Color } from "chess.js";
+import { useCallback, useMemo, useState } from "react";
+import { Chess, Square } from "chess.js";
 import {
   ConversationProvider,
   useConversationControls,
   useConversationStatus,
   useConversationMode,
+  useConversationClientTool,
 } from "@elevenlabs/react";
 import { Orb } from "@/components/ui/orb";
 
@@ -80,7 +81,6 @@ function AgentPanel({ game, makeMove }: { game: Chess; makeMove: (from: string, 
   const { startSession, endSession } = useConversationControls();
   const { status } = useConversationStatus();
   const { isSpeaking, isListening } = useConversationMode();
-  const [lastMove, setLastMove] = useState<string | null>(null);
 
   const agentState = useMemo(() => {
     if (status !== "connected") return null;
@@ -88,6 +88,43 @@ function AgentPanel({ game, makeMove }: { game: Chess; makeMove: (from: string, 
     if (isListening) return "listening";
     return null;
   }, [status, isSpeaking, isListening]);
+
+  const getBoardDescription = useCallback(() => {
+    const turn = game.turn() === "w" ? "White" : "Black";
+    const board = game.board();
+    const pieces: string[] = [];
+
+    board.forEach((row, rank) => {
+      row.forEach((piece, file) => {
+        if (piece) {
+          const square = `${String.fromCharCode(97 + file)}${8 - rank}`;
+          const pieceName = {
+            p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king",
+          }[piece.type];
+          const color = piece.color === "w" ? "White" : "Black";
+          pieces.push(`${color} ${pieceName} on ${square}`);
+        }
+      });
+    });
+
+    const status = game.isCheckmate()
+      ? "Checkmate!"
+      : game.isCheck()
+      ? "Check!"
+      : game.isDraw()
+      ? "Draw"
+      : `${turn} to move`;
+
+    return `Board status: ${status}. Pieces: ${pieces.join(", ")}.`;
+  }, [game]);
+
+  useConversationClientTool("getBoard", () => getBoardDescription());
+
+  useConversationClientTool("makeMove", (params: Record<string, unknown>) => {
+    const { from, to, promotion } = params as { from: string; to: string; promotion?: string };
+    const success = makeMove(from, to, promotion as "q" | "r" | "b" | "n" | undefined);
+    return success ? `Move ${from} to ${to} completed.` : `Invalid move: ${from} to ${to}.`;
+  });
 
   return (
     <div className="flex flex-col items-center gap-6 p-6 bg-zinc-800/50 rounded-2xl border border-cyan-500/20 backdrop-blur-sm">
@@ -105,9 +142,6 @@ function AgentPanel({ game, makeMove }: { game: Chess; makeMove: (from: string, 
             {status === "connected" ? "Connected" : "Disconnected"}
           </p>
         </div>
-        {lastMove && (
-          <p className="text-sm text-cyan-400 font-medium">{lastMove}</p>
-        )}
       </div>
 
       {status === "connected" ? (
@@ -261,49 +295,8 @@ function ChessGame() {
     setIsAIThinking(false);
   }, []);
 
-  const getBoardDescription = useCallback(() => {
-    const turn = game.turn() === "w" ? "White" : "Black";
-    const board = game.board();
-    const pieces: string[] = [];
-
-    board.forEach((row, rank) => {
-      row.forEach((piece, file) => {
-        if (piece) {
-          const square = `${String.fromCharCode(97 + file)}${8 - rank}`;
-          const pieceName = {
-            p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king",
-          }[piece.type];
-          const color = piece.color === "w" ? "White" : "Black";
-          pieces.push(`${color} ${pieceName} on ${square}`);
-        }
-      });
-    });
-
-    const status = game.isCheckmate()
-      ? "Checkmate!"
-      : game.isCheck()
-      ? "Check!"
-      : game.isDraw()
-      ? "Draw"
-      : `${turn} to move`;
-
-    return `Board status: ${status}. Pieces: ${pieces.join(", ")}.`;
-  }, [game]);
-
-  const clientTools = useMemo(
-    () => ({
-      getBoard: () => getBoardDescription(),
-      makeMove: (params: { from: string; to: string; promotion?: string }) => {
-        const { from, to, promotion } = params;
-        const success = makeMove(from, to, promotion as "q" | "r" | "b" | "n" | undefined);
-        return success ? `Move ${from} to ${to} completed.` : `Invalid move: ${from} to ${to}.`;
-      },
-    }),
-    [getBoardDescription, makeMove]
-  );
-
   return (
-    <ConversationProvider clientTools={clientTools}>
+    <ConversationProvider>
       <div className="flex flex-col lg:flex-row items-center gap-8 p-4">
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center gap-4 mb-2">
